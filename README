@@ -12,6 +12,9 @@ COMMAND LINE
         [--pipelinetype {tests,auto_pipelines,pipelines}]
         infile [infile ...]
 
+EXAMPLE USAGE
+	./docvert-cli.py -p web\ standards  ~/Desktop/lizard.odt
+
 COMMUNITY
     http://lists.catalyst.net.nz/mailman/listinfo/docvert
 
