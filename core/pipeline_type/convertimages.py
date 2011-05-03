@@ -60,7 +60,9 @@ class ConvertImages(pipeline_item.pipeline_stage):
                     continue
                 extension = os.path.splitext(storage_path)[1][1:]
                 if conversions.has_key(extension):
-                    self.storage.remove(storage_path)
+                    #PNG file 'conversion' is copying the original, so do no delete it
+                    if extension != 'png':
+                        self.storage.remove(storage_path)
 
         for intermediate_file in self.intermediate_files:
             path, extension = os.path.splitext(intermediate_file)
