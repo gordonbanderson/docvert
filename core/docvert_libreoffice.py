@@ -6,6 +6,7 @@ import sys
 from StringIO import StringIO
 import document_type
 import docvert_exception
+import socket
 
 DEFAULT_LIBREOFFICE_PORT = 2002
 LIBREOFFICE_OPEN_DOCUMENT = 'writer8'
@@ -18,12 +19,19 @@ try:
 except ImportError:
     sys.path.append('/opt/libreoffice/program/')
     sys.path.append('/usr/lib/libreoffice/program/')
+    sys.path.append('/usr/share/libreoffice/program/')
     sys.path.append('/usr/lib/openoffice.org/program/')
     sys.path.append('/usr/lib/openoffice.org2.0/program/')
     try:
         import uno
     except ImportError:
-        sys.stderr.write("Error: Unable to find Python UNO libraries in %s. Exiting..." % sys.path)
+        python_version_info = sys.version_info
+        python_version = "%s.%s.%s" % (python_version_info[0], python_version_info[1], python_version_info[2])
+        alternate_python_version = "2.6"
+        the_command_they_ran = " ".join(sys.argv)
+        if python_version.startswith("2.6"):
+              alternate_python_version = "2.7"
+        sys.stderr.write("Error: Unable to find Python UNO libraries in %s.\nAre Python UNO libraries somewhere else?\nAlternatively, Docvert is currently running Python %s so perhaps Python %s has Python UNO libraries? If so, then try calling %s with that version of python (either as 'python%s %s' or change the first line of %s)\nExiting...\n" % (sys.path, python_version, alternate_python_version, the_command_they_ran, alternate_python_version, the_command_they_ran, the_command_they_ran))
         sys.exit(0)
         
 import unohelper
@@ -57,7 +65,7 @@ class libreoffice_client(object):
         try:
             context = resolver.resolve("uno:socket,host=localhost,port=%s;urp;StarOffice.ComponentContext" % port)
         except NoConnectException, exception:
-            raise Exception, "Failed to connect to LibreOffice.org on port %s. %s" % (port, exception)
+            raise Exception, "Failed to connect to LibreOffice on port %s. %s\nIf you don't have a server then read README for 'OPTIONAL LIBRARIES' to see how to set one up." % (port, exception)
         self._desktop = context.ServiceManager.createInstanceWithContext("com.sun.star.frame.Desktop", context)
 
     def convert_by_stream(self, data, format=LIBREOFFICE_OPEN_DOCUMENT):
@@ -82,7 +90,7 @@ class libreoffice_client(object):
             doc_type = document_type.detect_document_type(output_stream.data)
             output_stream.data.seek(0)
             if format == LIBREOFFICE_OPEN_DOCUMENT and doc_type != document_type.types.oasis_open_document:
-                raise docvert_exception.converter_unable_to_generate_open_document("Unable to generate OpenDocument, was detected as %s. First 2 bytes = %s" % (doc_type, output_stream.data.read(2)))
+                raise docvert_exception.converter_unable_to_generate_open_document("Unable to generate OpenDocument, was detected as %s.\n\nAre you sure you tried to convert an office document? If so then it\nmight be a bug, so please contact http://docvert.org and we'll see\nif we can fix it. Thanks!" % doc_type)
             elif format == LIBREOFFICE_PDF and doc_type != document_type.types.pdf:
                 raise docvert_exception.converter_unable_to_generate_pdf("Unable to generate PDF, was detected as %s. First 4 bytes = %s" % (doc_type, output_stream.data.read(4)))
         return output_stream.data
@@ -95,6 +103,13 @@ class libreoffice_client(object):
             prop.Value = args[key]
             props.append(prop)
         return tuple(props)
+
+def checkLibreOfficeStatus():
+    try:
+        libreoffice_client()
+        return True
+    except Exception:
+        return False
 
 def get_client():
     global client

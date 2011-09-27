@@ -5,11 +5,12 @@
     <!-- <xsl:key name='heading-children' match="*[not(self::text:h or self::text:section)]" use="generate-id((..|preceding-sibling::text:h[@text:outline-level='1']|preceding-sibling::text:h[@text:outline-level='2']|preceding-sibling::text:h[@text:outline-level='3']|preceding-sibling::text:h[@text:outline-level='4']|preceding-sibling::text:h[@text:outline-level='5']|preceding-sibling::text:h[@text:outline-level='6'])[last()])"/> -->
     <xsl:key name='heading-children' match="text:p | table:table | text:ordered-list | text:list | draw:frame | draw:image | svg:desc | office:annotation | text:unordered-list | text:footnote | text:a | text:list-item | draw:plugin | draw:text-box | text:footnote-body | text:section" use="generate-id((..|preceding-sibling::text:h[@text:outline-level='1']|preceding-sibling::text:h[@text:outline-level='2']|preceding-sibling::text:h[@text:outline-level='3']|preceding-sibling::text:h[@text:outline-level='4']|preceding-sibling::text:h[@text:outline-level='5']|preceding-sibling::text:h[@text:outline-level='6'])[last()])"/>
     <xsl:key name="list-group" match="text:ordered-list[not(ancestor::text:list-item)] | text:unordered-list[not(ancestor::text:list-item)]" use="concat(generate-id(preceding-sibling::*[not(self::text:unordered-list | self::text:ordered-list)][1]), generate-id(ancestor::table:table-cell))"/>
-    <xsl:key name="list-item-group" match="text:list-item" use="concat(generate-id(ancestor::table:table-cell),'|',generate-id(ancestor::*[self::text:unordered-list | self::text:ordered-list][last()]/preceding-sibling::*[not(self::text:unordered-list | self::text:ordered-list)][1]),'|',local-name(parent::*),'|',count(ancestor-or-self::text:list-item))"/>
+    <xsl:key name="list-item-group" match="text:list-item" use="concat(generate-id(ancestor::table:table-cell),'|',generate-id(ancestor::*[self::text:unordered-list | self::text:ordered-list][last()]/preceding-sibling::*[not(self::text:unordered-list | self::text:ordered-list)][1]),'|',local-name(parent::*),'|',count(ancestor-or-self::text:list-item), '|', count(*[not(self::text:unordered-list or self::text:ordered-list)]) &gt; 0 )"/>
     <xsl:key name="styles-by-name" match="style:style" use="@style:name"/>
     <xsl:key name="elements-by-style-name" match="*[@text:style-name]" use="@text:style-name"/>
     <xsl:variable name="lowercase">abcdefghijklmnopqrstuvwxyz</xsl:variable>
     <xsl:variable name="uppercase">ABCDEFGHIJKLMNOPQRSTUVWXYZ</xsl:variable>
+    <xsl:variable name="numbers">1234567890</xsl:variable>
 
     <xsl:template match="/docvert:root">
         <xsl:apply-templates select="docvert:external-file[@docvert:name='content.xml']"/>
@@ -84,6 +85,9 @@
         <xsl:variable name="separate-list"><xsl:call-template name="is-separate-list"/></xsl:variable>
         <xsl:if test="normalize-space($separate-list)">
             <xsl:element name="db:orderedlist">
+                <xsl:if test="@text:continue-numbering = 'true'">
+                    <xsl:attribute name="continuation">continues</xsl:attribute>
+                </xsl:if>
                 <xsl:apply-templates/>
             </xsl:element>
         </xsl:if>
@@ -143,7 +147,7 @@
         <xsl:element name="db:listitem">
             <xsl:apply-templates/>
             <xsl:if test="$list-item-generate-id = generate-id($last-list-item-within-ancestor-list)">
-<!--                LAST: Current List Group Position: <xsl:value-of select="$current-list-group-position"/> out of <xsl:value-of select="count($list-group)"/>.-->
+                <!-- LAST: Current List Group Position: <xsl:value-of select="$current-list-group-position"/> out of <xsl:value-of select="count($list-group)"/>.-->
                 <xsl:variable name="list-pointer" select="$following-lists-within-group[1]/descendant::*[self::text:unordered-list or self::text:ordered-list][count(ancestor::text:list-item) &gt;= $list-depth]"/>
                 <xsl:choose>
                     <xsl:when test="$list-pointer">
@@ -158,7 +162,8 @@
         <xsl:if test="$list-item-generate-id = generate-id($last-list-item-within-ancestor-list)">
             <!-- See if there's a continuation of list-items in a list directly down at the same level. Obviously, to continue list numbering the list must be the same $list-type (ordered or unordered). -->
             <xsl:variable name="list-type" select="local-name(parent::*)"/>
-            <xsl:variable name="list-item-group" select="key('list-item-group', concat(generate-id(ancestor::table:table-cell),'|',generate-id($preceding-non-list),'|',$list-type,'|',$list-depth) ) " />
+            <xsl:variable name="has-immediate-children-that-are-not-lists" select="count(*[not(self::text:unordered-list or self::text:ordered-list)]) &gt; 0"/>
+            <xsl:variable name="list-item-group" select="key('list-item-group', concat(generate-id(ancestor::table:table-cell),'|',generate-id($preceding-non-list),'|',$list-type,'|',$list-depth,'|',$has-immediate-children-that-are-not-lists) ) " />
             <xsl:if test="count($list-item-group) = 0">
                 <xsl:message terminate="yes">ERROR: Unable to identify this list-item-group in the key('list-item-group').
                     #<xsl:value-of select="count(preceding::text:list-item)"/>
@@ -241,6 +246,17 @@
 </xsl:template>
 -->
 
+    <xsl:template match="text:note">
+        <xsl:element name="db:footnote">
+            <xsl:attribute name="label">
+                <xsl:apply-templates select="text:note-citation"/>
+                <xsl:if test="not(text:note-citation) or normalize-space(text:note-citation) = '' ">
+                    <xsl:value-of select="count(preceding::text:note) + 1"/>
+                </xsl:if>
+            </xsl:attribute>
+            <xsl:apply-templates select="text:note-body"/>
+        </xsl:element>
+    </xsl:template>
 
     <xsl:template match="text:line-break">
         <xsl:element name="db:sbr"/>
@@ -248,9 +264,119 @@
 
     <xsl:template match="text:a">
         <xsl:element name="db:link">
-            <xsl:attribute name="xlink:href"><xsl:value-of select="@xlink:href"/></xsl:attribute>
+            <xsl:attribute name="xlink:href">
+                <xsl:choose>
+                    <xsl:when test="starts-with(@xlink:href, '#')">
+                        <xsl:variable name="outline-suffix" select=" '|outline' "/>
+                        <xsl:variable name="table-suffix" select=" '|table' "/>
+
+                        <xsl:choose>
+                            <!-- Because XPATH1.0 doesn't support fn:ends-with() -->
+                            <xsl:when test="substring(@xlink:href, string-length(@xlink:href) - string-length($outline-suffix) + 1) = $outline-suffix ">
+                                <xsl:text>#</xsl:text>
+                                <xsl:call-template name="outline-descend-index">
+                                    <xsl:with-param name="heading-level-index-list" select="substring(@xlink:href,2)"/>
+                                    <xsl:with-param name="heading-level" select="1"/>
+                                    <xsl:with-param name="current-heading" select="//office:body/office:text/*[1]"/>
+                                </xsl:call-template>
+                                <!-- <xsl:variable name="outline" select="substring(@xlink:href, 1, string-length(@xlink:href) - string-length('|outline') )"/>[outline] <xsl:value-of select="$outline"/> -->
+                            </xsl:when>
+                            <!-- Because XPATH1.0 doesn't support fn:ends-with() -->
+                            <xsl:when test="substring(@xlink:href, string-length(@xlink:href) - string-length($table-suffix) + 1) = $table-suffix ">
+                                <xsl:variable name="table-id" select="substring(@xlink:href, 2, string-length(@xlink:href) - string-length($table-suffix) - 1)"/>
+                                <xsl:variable name="target" select="//table:table[@table:name = $table-id]"/>
+                                <xsl:if test="not($target)">
+                                    <xsl:message terminate="yes">
+                                        Can't find an internal target table with a @table:name="<xsl:value-of select="$table-id"/>"
+                                    </xsl:message>
+                                </xsl:if>
+                                <xsl:text>#</xsl:text>
+                                <xsl:value-of select="generate-id($target)"/>
+                            </xsl:when>
+                            <xsl:otherwise>
+                                <xsl:value-of select="@xlink:href"/>
+                            </xsl:otherwise>
+                        </xsl:choose>
+                    </xsl:when>
+                    <xsl:otherwise>
+                        <xsl:value-of select="@xlink:href"/>
+                    </xsl:otherwise>
+                </xsl:choose>
+            </xsl:attribute>
             <xsl:apply-templates/>
         </xsl:element>
+    </xsl:template>
+
+    <xsl:template name="outline-descend-index">
+        <xsl:param name="heading-level-index-list"/>
+        <xsl:param name="heading-level"/>
+        <xsl:param name="current-heading"/>
+        <xsl:if test="not($current-heading)">
+            <xsl:message terminate="yes">
+                Error in 'outline-descend-index'. $current-heading was empty.
+            </xsl:message>
+        </xsl:if>
+        <xsl:variable name="current-index-string" select="substring-before($heading-level-index-list,'.')"/>
+        <xsl:choose>
+            <xsl:when test="string-length($current-index-string) &gt; 0 and string-length(translate($current-index-string, $numbers, '')) = 0">
+                <!-- then there was a number -->
+                <xsl:variable name="current-index" select="number($current-index-string)"/>
+                <xsl:variable name="next-heading" select="$current-heading/following::text:h[@text:outline-level=$heading-level][$current-index]"/>
+                <xsl:variable name="next-heading-level-index-list" select="substring-after($heading-level-index-list, '.')"/>
+                <!--
+                
+                <xsl:variable name="next-current-index" select="substring-before($next-heading-level-index-list,'.')"/>
+                <xsl:variable name="is-there-a-next-current-index" select="string-length($next-current-index) &gt; 0 and string-length(translate($next-current-index, $numbers, '')) = 0"/>
+                <xsl:variable name="next-heading" select="$current-heading/following::text:h[@text:outline-level=($heading-level+1)][$current-index]"/>
+                -->
+                <xsl:choose>
+                    <xsl:when test="$current-index = 0">
+                        <xsl:call-template name="outline-descend-index">
+                            <xsl:with-param name="heading-level-index-list" select="$next-heading-level-index-list"/>
+                            <xsl:with-param name="heading-level" select="$heading-level + 1"/>
+                            <xsl:with-param name="current-heading" select="$current-heading"/>
+                        </xsl:call-template>
+                    </xsl:when>
+                    <xsl:when test="$next-heading">
+                        <xsl:call-template name="outline-descend-index">
+                            <xsl:with-param name="heading-level-index-list" select="$next-heading-level-index-list"/>
+                            <xsl:with-param name="heading-level" select="$heading-level + 1"/>
+                            <xsl:with-param name="current-heading" select="$next-heading"/>
+                        </xsl:call-template>
+                    </xsl:when>
+                    <xsl:otherwise>
+                        <xsl:message terminate="yes">
+                            <xsl:text>Error in 'outline-descend-index' or in conversion document. I can't find a heading level </xsl:text>
+                            <xsl:value-of select="$heading-level"/>
+                            <xsl:text> at offset </xsl:text>
+                            <xsl:value-of select="$current-index"/>
+                            <xsl:text>. </xsl:text>
+                            <xsl:choose>
+                                <xsl:when test="$current-heading/following::text:h[@text:outline-level=$heading-level]"><xsl:text>There was at least one following heading. </xsl:text></xsl:when>
+                                <xsl:otherwise><xsl:text>There were no following headings to match. </xsl:text></xsl:otherwise>
+                            </xsl:choose>
+                            <xsl:text>I searched from the $current-heading </xsl:text>
+                            <xsl:choose>
+                                <xsl:when test="$current-heading[@id]">
+                                    <xsl:text>with @id=</xsl:text><xsl:value-of select="$current-heading/@id"/>.
+                                </xsl:when>
+                                <xsl:otherwise>
+                                    <xsl:text>with the text contents "</xsl:text>
+                                    <xsl:value-of select="$current-heading"/>
+                                    <xsl:text>"</xsl:text>
+                                </xsl:otherwise>
+                            </xsl:choose>
+                            <xsl:text>The pattern $heading-level-index-list "</xsl:text>
+                            <xsl:value-of select="$heading-level-index-list"/>
+                            <xsl:text>".</xsl:text>
+                        </xsl:message>
+                    </xsl:otherwise>
+                </xsl:choose>
+            </xsl:when>
+            <xsl:otherwise>
+                <xsl:value-of select="generate-id($current-heading)"/>
+            </xsl:otherwise>
+        </xsl:choose>
     </xsl:template>
 
     <xsl:template match="text:span">
@@ -260,9 +386,22 @@
             <xsl:when test="$child-text-style and contains($text-style/style:text-properties/@fo:font-style, 'italic') and contains($child-text-style/style:text-properties/@fo:font-style, 'normal')">
                 <xsl:apply-templates/>
             </xsl:when>
+            <xsl:when test="contains($text-style/style:text-properties/@fo:font-weight, 'bold') and contains($text-style/style:text-properties/@fo:font-style, 'italic')">
+                <xsl:element name="db:emphasis">
+                    <xsl:element name="db:emphasis">
+                        <xsl:attribute name="role">strong</xsl:attribute>
+                        <xsl:apply-templates/>
+                    </xsl:element>
+                </xsl:element>
+            </xsl:when>
+            <xsl:when test="contains($text-style/style:text-properties/@fo:font-weight, 'bold')">
+                <xsl:element name="db:emphasis">
+                    <xsl:attribute name="role">bold</xsl:attribute>
+                    <xsl:apply-templates/>
+                </xsl:element>
+            </xsl:when>
             <xsl:when test="contains($text-style/style:text-properties/@fo:font-style, 'italic')">
                 <xsl:element name="db:emphasis">
-                    <!--[<xsl:value-of select="@text:style-name"/>|<xsl:value-of select="$text-style/style:text-properties/@fo:font-style"/>[ -->
                     <xsl:apply-templates/>
                 </xsl:element>
             </xsl:when>
@@ -286,12 +425,27 @@
         <xsl:element name="db:mediaobject">
             <xsl:element name="db:imageobject">
                 <xsl:element name="db:imagedata">
-                    <xsl:attribute name="fileref"><xsl:value-of select="@xlink:href"/></xsl:attribute>
+                    <xsl:attribute name="fileref">
+                        <xsl:choose>
+                            <xsl:when test="contains(@xlink:href,'/')">
+                                <xsl:value-of select="substring-after(@xlink:href,'/')"/>
+                            </xsl:when>
+                            <xsl:otherwise>
+                                <xsl:value-of select="@xlink:href"/>
+                            </xsl:otherwise>
+                        </xsl:choose>
+                    </xsl:attribute>
                     <xsl:attribute name="depth"><xsl:value-of select="parent::*/@svg:width"/></xsl:attribute>
                     <xsl:attribute name="height"><xsl:value-of select="parent::*/@svg:height"/></xsl:attribute>
-                    <xsl:attribute name="fileref"><xsl:value-of select="@xlink:href"/></xsl:attribute>
                 </xsl:element>
             </xsl:element>
+        </xsl:element>
+    </xsl:template>
+
+    <xsl:template match="text:bookmark">
+        <xsl:element name="db:anchor">
+            <xsl:attribute name="xml:id"><xsl:value-of select="@text:name"/></xsl:attribute>
+            <xsl:apply-templates/>
         </xsl:element>
     </xsl:template>
 
@@ -304,6 +458,7 @@
 
     <xsl:template match="table:table">
         <xsl:element name="db:table">
+            <xsl:attribute name="db:id"><xsl:value-of select="generate-id()"/></xsl:attribute>
             <xsl:apply-templates/>                  
         </xsl:element>
     </xsl:template>
@@ -382,6 +537,7 @@
         <xsl:param name="descend-sections-or-apply-templates"/>
         <xsl:param name="outline-level"/>
         <xsl:param name="previous-outline-level"/>
+        <xsl:attribute name="db:id"><xsl:value-of select="generate-id()"/></xsl:attribute>
         <xsl:choose>
             <xsl:when test="$descend-sections-or-apply-templates = 'descend sections'">
                 <xsl:call-template name="section">

@@ -13,6 +13,7 @@ var docvert = {
             form_element.animate({top:0}, "slow")
         }
     },
+
     upload_file_change: function(event){
         $(event.target).parent().append($(event.target).clone())
         var text = $(event.target).val()
@@ -21,7 +22,7 @@ var docvert = {
             full_text = text
             text = text.substring(0,15) + "\u2026" + text.substring(text.length-10)
         }
-        var list_item = $("<li>").attr("title",full_text).append($(event.target).attr("id","").css("display","none")).append(text).append(' <a href="#delete-item" class="delete" title="Remove upload item">&times</a>').hide()
+        var list_item = $("<li>").attr("title",full_text).append($(event.target).attr("id","").css("display","none")).text(text).append(' <a href="#delete-item" class="delete" title="Remove upload item">&times</a>').hide()
         $("#upload_list").append(list_item)
         list_item.slideDown()
         $("#upload_submit").removeClass("disabled").addClass("enabled")
@@ -49,7 +50,6 @@ var docvert = {
         $("#upload_from_file").removeClass("upload_button_hover")
     },
 
-
     reveal_upload_web_dialog: function(event){
         var sender = $(event.target)
         sender_offset = sender.offset()
@@ -75,6 +75,7 @@ var docvert = {
     },
 
     check_submit: function(event){
+        docvert.hide_upload_web_dialog()
         var should_submit = ($("#upload_list li").length > 0)
         if(!should_submit) {
             $("#submit_error").slideDown().find("span").animate({"marginLeft": "50px"}, function(){
@@ -115,6 +116,29 @@ var docvert = {
         if (event.keyCode == escape_key) {
             $("#upload_from_web_dialog").hide()
         }
+    },
+
+    reset_check_libreoffice_status: function(){
+        docvert.number_of_libreoffice_checks_remaining = 10
+    },
+
+    check_libreoffice_status: function(event) {
+        $.ajax({
+            url: '/libreoffice-status',
+            dataType: 'json',
+            success: function(data, textStatus, jqXHR){
+                if(data['libreoffice-status']) {
+                    $("#libreOfficeStatus").removeClass("libreOfficeStatus_False").addClass("libreOfficeStatus_True")
+                } else {
+                    $("#libreOfficeStatus").removeClass("libreOfficeStatus_True").addClass("libreOfficeStatus_False")
+                }
+                docvert.number_of_libreoffice_checks_remaining -= 1
+                if(docvert.number_of_libreoffice_checks_remaining > 0){
+                    docvert.libreoffice_status_timer = setTimeout(docvert.check_libreoffice_status, 1000)
+                }
+                //$("#advanced").text(docvert.number_of_libreoffice_checks_remaining)
+            }
+        })
     }
 }
 
@@ -125,8 +149,8 @@ $(document).ready(function(){
     $(".delete").live("click", docvert.upload_file_delete)
     var upload_file = $("#upload_file")
     upload_file.change(docvert.upload_file_change)
-    upload_file.mouseover(docvert.upload_file_mouseover)
-    upload_file.mouseout(docvert.upload_file_mouseout)
+               .mouseover(docvert.upload_file_mouseover)
+               .mouseout(docvert.upload_file_mouseout)
     $("#upload_documents label").css({
         "width":upload_file.width() + "px",
         "height": upload_file.height() + "px",
@@ -134,11 +158,22 @@ $(document).ready(function(){
     $("#upload_from_web label").click(docvert.reveal_upload_web_dialog)
     $("#upload_from_web_dialog").hide()
     $("#upload_from_web_dialog input").blur(docvert.hide_upload_web_dialog)
-    $("fieldset, #button_tray").width((upload_file.width() * 2) + 30)
+    $("fieldset,#button_tray").width((upload_file.width() * 2) + 30)
     $("#page,form").width((upload_file.width() * 2) + 53)
     $("#upload_submit").click(docvert.check_submit)
     $("select").dropp()
     $("#advanced .inner").addClass("closed").hide()
     $("#advanced legend a").click(docvert.click_advanced)
+    docvert.reset_check_libreoffice_status()
+    docvert.libreoffice_status_timer = setTimeout(docvert.check_libreoffice_status, 1000)
+    $("*").live("focus click", docvert.reset_check_libreoffice_status)
+    $("#break_up_pages").change(function(){
+        if($(this).is(":checked")){
+            $("#autopipelines_options").slideDown().parent()
+        } else {
+            $("#autopipelines_options").slideUp()
+        }
+        $("#autopipeline").nextAll(".dropp_dropdown_list").width(upload_file.width() * 2 + 30).css("clear","both")
+    }).change()
 }).keydown(docvert.keydown)
 

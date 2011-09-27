@@ -13,7 +13,7 @@
             <li><a href="tests">Tests</a></li>
             <li class="current"><a href="#index">Web Service</a></li>
         </ul>
-        <h1>Doc<span class="syllable">vert</span> <span class="version">5</span> <span class="slogan"><abbr title="Microsoft">MS</abbr>Word to Open Standards</span></h1>
+        <h1>Doc<span class="syllable">vert</span> <span class="version">5.1</span> <span class="slogan"><abbr title="Microsoft">MS</abbr>Word to Open Standards</span></h1>
         <form method="post" action="web-service" enctype="multipart/form-data">
             <div id="page">
                 <fieldset id="upload_fieldset">
@@ -32,20 +32,26 @@
                     </ul>
                 </fieldset>
                 <fieldset id="pipelines">
-                    <legend><abbr title="Extensible Markup Language">XML</abbr> Pipeline</legend>
+                    <legend>Theme (<abbr title="Extensible Markup Language">XML</abbr> Pipeline)</legend>
                     <select name="pipeline" id="pipeline">
-% for pipeline in pipelines:
+% for pipeline in sorted(pipelines):
                         <option value="{{pipeline['id']}}">{{pipeline['name']}}</option>
 % end
                     </select>
                 </fieldset>
                 <fieldset id="autopipelines">
-                    <legend>Break Up Pages Over</legend>
-                    <select name="autopipeline" id="autopipeline">
+                    <legend>
+                        <input type="hidden" name="break_up_pages_ui_version" id="break_up_pages_ui_version" value="2">
+                        <label for="break_up_pages">Break over multiple pages? </label><input type="checkbox" name="break_up_pages" id="break_up_pages"/>
+                    </legend>
+                    <div id="autopipelines_options">
+                        <p class="break_pages_note"><span>Please note that some pipelines don't support multiple pages.</span></p>
+                        <select name="autopipeline" id="autopipeline">
 % for auto_pipeline in auto_pipelines:
-                        <option value="{{auto_pipeline['id']}}">{{auto_pipeline['name']}}</option>
+                            <option value="{{auto_pipeline['id']}}">{{auto_pipeline['name']}}</option>
 % end
-                    </select>
+                        </select>
+                    </div>
                 </fieldset>
                 <div id="upload_from_web_dialog">
                     <input type="text" name="upload_web[]" id="upload_web">
@@ -66,6 +72,11 @@
                     <input type="submit" value="Submit" id="upload_submit">
                 </div>
             </div>
+            <div id="libreOfficeStatus" class="libreOfficeStatus_{{libreOfficeStatus}}">LibreOffice <span></span></div>
         </form>
+        <div id="usageNote">
+            <h2>Dear programmers,</h2>
+            <p>this form sends files via HTTP POST so do the same in your software to build upon this web service.</p>
+        </div>
     </body>
 </html>

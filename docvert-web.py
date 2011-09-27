@@ -1,8 +1,12 @@
+#!/usr/bin/env python2.6
 # -*- coding: utf-8 -*-
 import sys
 import StringIO
 import uuid
 import os.path
+import socket
+import optparse
+import cgi
 docvert_root = os.path.dirname(os.path.abspath(__file__))
 inbuilt_bottle_path = os.path.join(docvert_root, 'lib/bottle')
 try:
@@ -19,29 +23,34 @@ except ImportError, exception:
         except NameError:
             import bottle
     except ImportError:
-        sys.stderr.write("Error: Unable to find Bottle libraries in %s. Exiting..." % sys.path)
+        sys.stderr.write("Error: Unable to find Bottle libraries in %s. Exiting...\n" % sys.path)
         sys.exit(0)
-
 import lib.bottlesession.bottlesession
 bottle.debug(True)
-
 import core.docvert
 import core.docvert_storage
 import core.docvert_exception
+import core.document_type
 
-# START CONFIG
+# START DEFAULT CONFIG
 theme='default'
 port=8080
 # END CONFIG
-
-theme_directory='./core/web_service_themes'
+parser = optparse.OptionParser()
+parser.add_option("-p", "--port", dest="port", help="Port to run on", type="int")
+(options, args) = parser.parse_args()
+if options.port:
+    port = options.port
+theme_directory='%s/core/web_service_themes' % docvert_root
 bottle.TEMPLATE_PATH.append('%s/%s' % (theme_directory, theme))
+
+# URL mappings
 
 @bottle.route('/index', method='GET')
 @bottle.route('/', method='GET')
 @bottle.view('index')
 def index():
-    return core.docvert.get_all_pipelines()
+    return dict(core.docvert.get_all_pipelines(False).items() + {"libreOfficeStatus": core.docvert_libreoffice.checkLibreOfficeStatus()}.items() )
 
 @bottle.route('/static/:path#.*#', method='GET')
 def static(path=''):
@@ -49,37 +58,55 @@ def static(path=''):
 
 @bottle.route('/lib/:path#.*#', method='GET')
 def libstatic(path=None):
-    return bottle.static_file(path, root='./lib')
+    return bottle.static_file(path, root='%s/lib' % docvert_root)
 
-@bottle.route('/web-service.php', method='POST') #for legacy support
+@bottle.route('/web-service.php', method='POST') #for legacy Docvert support
 @bottle.route('/web-service', method='POST')
 @bottle.view('web-service')
 def webservice():
     files = dict()
     first_document_id = None
     for key, item in bottle.request.files.iteritems():
-        filename = item.filename
-        unique = 1
-        while files.has_key(filename):
-            filename = item.filename + unique
-            unique += 1
-        try:
-            filename = filename.decode("utf-8")
-        except UnicodeDecodeException, exception:
-            pass
-        if first_document_id is None:
-            first_document_id = filename
-        files[filename] = StringIO.StringIO(item.value)
+        items = bottle.request.files.getall(key)
+        for field_storage in items:
+            filename = field_storage.filename
+            unique = 1
+            if files.has_key(filename) and files[filename].getvalue() == field_storage.value:
+                continue
+            while files.has_key(filename):
+                filename = field_storage.filename + str(unique)
+                unique += 1
+            try:
+                filename = filename.decode("utf-8")
+            except UnicodeDecodeException, exception:
+                pass
+            files[filename] = StringIO.StringIO(field_storage.value)
     pipeline_id = bottle.request.POST.get('pipeline')
-    auto_pipeline_id = bottle.request.POST.get('autopipeline')
+    auto_pipeline_id = None
+    if bottle.request.POST.get('break_up_pages_ui_version'):
+        if bottle.request.POST.get('break_up_pages'):
+            auto_pipeline_id = bottle.request.POST.get('autopipeline')
+        if auto_pipeline_id is None:
+            pipelines = core.docvert.get_all_pipelines().items()
+            for pipelinetype_key, pipelinetype_value in pipelines:
+                if pipelinetype_key == "auto_pipelines":
+                    for pipeline in pipelinetype_value:
+                        if "nothing" in pipeline["id"].lower():
+                            auto_pipeline_id = pipeline["id"]
+    else:
+        auto_pipeline_id = bottle.request.POST.get('autopipeline')
     docvert_4_default = '.default'
     if auto_pipeline_id and auto_pipeline_id.endswith(docvert_4_default):
         auto_pipeline_id = auto_pipeline_id[0:-len(docvert_4_default)]
     after_conversion = bottle.request.POST.get('afterconversion')
-    urls = bottle.request.POST.get('upload_web[]')
+    urls = bottle.request.POST.getall('upload_web[]')
+    if len(urls) == 1 and urls[0] == '':
+        urls = list()
+    else:
+        urls = set(urls)
     response = None
     try:
-        response = core.docvert.process_conversion(files, urls, pipeline_id, 'pipelines', auto_pipeline_id)
+        response = core.docvert.process_conversion(files, urls, pipeline_id, 'pipelines', auto_pipeline_id, suppress_errors=True)
     except core.docvert_exception.debug_exception, exception:
         bottle.response.content_type = exception.content_type
         return exception.data
@@ -91,18 +118,30 @@ def webservice():
     session = session_manager.get_session()
     conversion_id = "%s" % uuid.uuid4()
     session[conversion_id] = response
-    session_manager.save(session)
     conversions_tabs = dict()
+    first_document_url = "conversions/%s/%s/" % (conversion_id, response.default_document)
     for filename in files.keys():
         thumbnail_path = "%s/thumbnail.png" % filename
         if response.has_key(thumbnail_path):
             thumbnail_path = None
-        conversions_tabs[filename] = dict(pipeline=pipeline_id, auto_pipeline=auto_pipeline_id, thumbnail_path=thumbnail_path)
-    return dict(conversions=conversions_tabs, conversion_id=conversion_id, first_document_id=first_document_id)
+        conversions_tabs[filename] = dict(friendly_name=response.get_friendly_name_if_available(filename), pipeline=pipeline_id, auto_pipeline=auto_pipeline_id, thumbnail_path=thumbnail_path)
+    try:
+        session_manager.save(session)
+    except OSError, e:
+        import traceback
+        traceback.print_exc(file=sys.stdout)
+        conversions_tabs = {'Session file problem': dict(friendly_name='Session file problem', pipeline=None, auto_pipeline=None, thumbnail_path=None) }
+        first_document_url = "/bottle_session_file_problem"
+    return dict(conversions=conversions_tabs, conversion_id=conversion_id, first_document_url=first_document_url)
 
 @bottle.route('/favicon.ico', method='GET')
 def favicon():
     return bottle.static_file('favicon.ico', root='%s/%s' % (theme_directory, theme))
+
+@bottle.route('/bottle_session_file_problem', method='GET')
+def bottle_session_file_problem():
+    print '%s/lib/bottle' % docvert_root
+    return bottle.static_file('bottle_session_file_problem.html', root='%s/lib/bottle' % docvert_root)
 
 @bottle.route('/conversions/:conversion_id/:path#.*#')
 def conversion_static_file(conversion_id, path):
@@ -110,13 +149,13 @@ def conversion_static_file(conversion_id, path):
     session = session_manager.get_session()
     if not session.has_key(conversion_id): # They don't have authorisation
         raise bottle.HTTPError(code=404)
-    print path
     try:
         path = path.decode("utf-8")
     except UnicodeDecodeException, exception:
         pass
+    filetypes = {".xml":"text/xml", ".html":"text/html", ".xhtml":"text/html", ".htm":"text/html", ".svg":"image/svg+xml", ".txt":"text/plain", ".png":"image/png", ".gif":"image/gif", ".bmp":"image/x-ms-bmp", ".jpg":"image/jpeg", ".jpe":"image/jpeg", ".jpeg":"image/jpeg", ".css":"text/css", ".js":"text/javascript", ".odt":"application/vnd.oasis.opendocument.text", ".odp":"application/vnd.oasis.opendocument.presentation", ".ods":"application/vnd.oasis.opendocument.spreadsheet", ".dbk":"application/docbook+xml"}
     if not session[conversion_id].has_key(path): # They have authorisation but that exact path doesn't exist, try fallbacks
-        fallbacks = ["index.html", "index.htm", "index.xml", "index.php", "default.htm", "default.html", "index.asp", "default.aspx", "index.aspx", "default.aspx"]
+        fallbacks = ["index.html", "index.htm", "index.xml", "index.php", "default.htm", "default.html", "index.asp", "default.aspx", "index.aspx", "default.aspx", "index.txt", "index.odt", "default.odt", "index.dbk", "default.dbk"]
         valid_fallback_path = None
         separator = "/"
         if path.endswith("/"):
@@ -129,12 +168,24 @@ def conversion_static_file(conversion_id, path):
         if valid_fallback_path is None:
             raise bottle.HTTPError(code=404)
         path = valid_fallback_path
-    filetypes = {".xml":"text/xml", ".html":"text/html", ".xhtml":"text/html", ".htm":"text/html", ".svg":"image/svg+xml", ".png":"image/png", ".gif":"image/gif", ".bmp":"image/x-ms-bmp", ".jpg":"image/jpeg", ".jpe":"image/jpeg", ".jpeg":"image/jpeg", ".css":"text/css", ".js":"text/javascript"}
+        extension = os.path.splitext(path)[1]
+        #if core.document_type.detect_document_type(session[conversion_id][path]) == core.document_type.types.oasis_open_document:
+        if extension == ".odt":
+            bottle.response.content_type = filetypes[".html"]
+            link_html = 'click here to download %s' % cgi.escape(os.path.basename(path))
+            thumbnail_path = "%s/thumbnail.png" % path[0:path.rfind("/")]
+            if session[conversion_id].has_key(thumbnail_path):
+                link_html = '<img src="thumbnail.png"><br>' + link_html
+            return '<!DOCTYPE html><html><head><title>%s</title><style type="text/css">body{font-family:sans-serif;font-size:small} a{text-decoration:none} p{text-align:center} img{clear:both;border: solid 1px #cccccc}</style></head><body><p><a href="%s">%s</a></p></body></html>' % (
+                cgi.escape(path),
+                cgi.escape(os.path.basename(path)),
+                link_html
+            )
     extension = os.path.splitext(path)[1]
     if filetypes.has_key(extension):
         bottle.response.content_type = filetypes[extension]
     else:
-        bottle.response.content_type = "plain/text"
+        bottle.response.content_type = "text/plain"
     return session[conversion_id][path]
 
 @bottle.route('/conversions-zip/:conversion_id')
@@ -145,6 +196,10 @@ def conversion_zip(conversion_id):
         raise bottle.HTTPError(code=404)
     bottle.response.content_type = 'application/zip'
     return session[conversion_id].to_zip().getvalue()
+
+@bottle.route('/libreoffice-status', method='GET')
+def libreoffice_status():
+    return bottle.json_dumps( {"libreoffice-status":core.docvert_libreoffice.checkLibreOfficeStatus()} )
 
 @bottle.route('/tests', method='GET')
 @bottle.view('tests')
@@ -175,6 +230,11 @@ def web_service_tests(test_id):
 def tests_wrongdir():
     bottle.redirect('/tests')
 
-bottle.run(host='localhost', port=port, quiet=False)
-
+try:
+    bottle.run(host='localhost', port=port, quiet=False)
+except socket.error, e:
+    if 'address already in use' in str(e).lower():
+        print 'ERROR: localhost:%i already in use.\nTry another port? Use command line parameter -p PORT' % port
+    else:
+        raise
 
